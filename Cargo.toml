@@ -1,0 +1,9 @@
+[package]
+name = "hdl-docs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.5.35", features = ["derive", "string"] }
+femtovg = "0.14.0"
+vhdl_lang = "0.84.0"
