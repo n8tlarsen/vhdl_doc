@@ -1,7 +1,6 @@
 use clap::Parser;
 use std::{env, fs, path::PathBuf};
 
-mod symbol;
 use symbol::make_symbol;
 
 fn default_path(p: &str) -> PathBuf {
