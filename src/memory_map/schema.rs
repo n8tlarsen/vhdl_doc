@@ -1,13 +1,13 @@
-use schemars::{schema_for, JsonSchema};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize, JsonSchema)]
 pub struct Protocol {
-    pub name: String,
+    name: String,
     #[serde(rename = "addressMax")]
-    pub address_max: u64,
+    address_max: u64,
     #[serde(rename = "dataMin")]
-    pub data_min: u8,
+    data_min: u8,
 }
 
 #[derive(Deserialize, Serialize, JsonSchema)]
@@ -25,8 +25,8 @@ pub enum FieldType {
     Vector(u64),
     Unsigned(u64),
     Signed(u64),
-    UFixed(u64,u64),
-    SFixed(u64,u64),
+    UFixed(i64,i64),
+    SFixed(i64,i64),
 }
 
 #[derive(Deserialize, Serialize, JsonSchema)]
@@ -48,23 +48,23 @@ pub enum Access {
 
 #[derive(Deserialize, Serialize, JsonSchema)]
 pub struct Field {
-    pub name: String,
-    pub address: Option<HexInteger>,
-    pub access: Access,
+    name: String,
+    address: Option<HexInteger>,
+    access: Access,
     #[serde(rename = "type")]
-    pub field_type: String,
-    pub contains: Option<OneOrMoreField>,
+    field_type: String,
+    contains: Option<OneOrMoreField>,
 }
 
 #[derive(Deserialize, Serialize, JsonSchema)]
 pub struct MemoryMap {
-    pub name: String,
-    pub protocol: Protocol,
-    pub address: Option<HexInteger>,
-    pub access: Access,
+    name: String,
+    protocol: Protocol,
+    address: Option<HexInteger>,
+    access: Access,
     #[serde(rename = "type")]
-    pub field_type: FieldType,
-    pub contains: Option<OneOrMoreField>,
+    field_type: FieldType,
+    contains: Option<OneOrMoreField>,
 }
 
 
