@@ -59,11 +59,15 @@ pub enum Access {
 #[derive(Deserialize, Serialize, JsonSchema)]
 pub struct Field {
     name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     address: Option<Address>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     access: Option<Access>,
     #[serde(rename = "type")]
-    field_type: String,
+    field_type: FieldType,
+    #[serde(skip_serializing_if = "Option::is_none")]
     contains: Option<OneOrMoreField>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     value: Option<Value>
 }
 

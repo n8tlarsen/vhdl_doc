@@ -1,0 +1,16 @@
+{
+    "protocol": {
+        "name": "Example Protocol",
+        "addressMax": 65535,
+        "dataMin": 1
+    },
+    "name": "Example Memory Map",
+    "type": "set",
+    "contains": {
+        "name": "Description String",
+        "address": 0,
+        "access": "r",
+        "type": { "string": 20 },
+        "value": "My Great Memory Map"
+    }
+}

@@ -1,0 +1,14 @@
+name = "Example Memory Map"
+type = "set"
+
+[protocol]
+name       = "Example Protocol"
+addressMax = 0xFFFF
+dataMin    = 1
+
+[contains]
+name    = "Description String"
+address = 0x0000
+value   = "My Great Memory Map"
+access  = "r"
+type    = { string = 20 }

@@ -1,8 +1,9 @@
 use clap::Parser;
 use std::{env, fs, path::PathBuf};
 use schemars::schema_for;
+use toml;
 
-use vhdl_doc::memory_map::schema;
+use vhdl_doc::memory_map::schema::{self, MemoryMap};
 use vhdl_doc::symbol::symbol::make_symbol;
 
 fn default_path(p: &str) -> PathBuf {
