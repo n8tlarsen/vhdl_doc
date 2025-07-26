@@ -2,17 +2,18 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct Protocol {
-    name: String,
-    #[serde(rename = "addressMax")]
-    address_max: u64,
-    #[serde(rename = "dataMin")]
+    name: Option<String>,
+    #[schemars(description = "Maximum address in terms of dataMin")]
+    address_max: Address,
+    #[schemars(description = "Minimum addressable data size in bytes")]
     data_min: u8,
 }
 
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
-pub enum HexInteger {
+pub enum Address {
     Str(String),
     Int(u64),
 }
@@ -37,6 +38,15 @@ pub enum OneOrMoreField {
 }
 
 #[derive(Deserialize, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum Value {
+    String(String),
+    Unsigned(u64),
+    Signed(i64),
+    Float(f64)
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
 pub enum Access {
     #[serde(rename = "r")]
     Read,
@@ -49,22 +59,19 @@ pub enum Access {
 #[derive(Deserialize, Serialize, JsonSchema)]
 pub struct Field {
     name: String,
-    address: Option<HexInteger>,
-    access: Access,
+    address: Option<Address>,
+    access: Option<Access>,
     #[serde(rename = "type")]
     field_type: String,
     contains: Option<OneOrMoreField>,
+    value: Option<Value>
 }
 
 #[derive(Deserialize, Serialize, JsonSchema)]
 pub struct MemoryMap {
-    name: String,
     protocol: Protocol,
-    address: Option<HexInteger>,
-    access: Access,
-    #[serde(rename = "type")]
-    field_type: FieldType,
-    contains: Option<OneOrMoreField>,
+    #[serde(flatten)]
+    field: Field
 }
 
 

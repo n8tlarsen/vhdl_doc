@@ -12,7 +12,7 @@
 - [Comment Specification](spec/README.md)
     - [Style](spec/style.md)
     - [Symbols]()
-    - [Memory Maps]()
+    - [Memory Maps](spec/memory_map.md)
     - [Linking Assets]()
 - [Command Line Tool](cli/README.md)
     - [init]()

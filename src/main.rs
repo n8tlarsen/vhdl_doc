@@ -22,7 +22,6 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-    println!("Source: {:?}, Output {:?}", args.source_path, args.doc_path);
     fs::create_dir_all(args.doc_path.clone()).unwrap();
     make_symbol(args.doc_path);
     let schema = schema_for!(schema::MemoryMap);
