@@ -1,13 +1,16 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use schemars::schema_for;
+use serde_json::ser::PrettyFormatter;
 
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Protocol {
+    #[doc = "An optional name for the protocol"]
     name: Option<String>,
-    #[schemars(description = "Maximum address in terms of dataMin")]
+    #[doc = "Maximum address in terms of dataMin"]
     address_max: Address,
-    #[schemars(description = "Minimum addressable data size in bytes")]
+    #[doc = "Minimum addressable data size in bytes"]
     data_min: u8,
 }
 
@@ -78,4 +81,12 @@ pub struct MemoryMap {
     field: Field
 }
 
+pub fn get_memory_map_schema() -> String {
+    let schema = schema_for!(MemoryMap);
+    let formatter = PrettyFormatter::with_indent(b"    ");
+    let mut buf = Vec::new();
+    let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
+    serde::Serialize::serialize(&schema, &mut ser).expect("Failed to serialize schema");
+    String::from_utf8(buf).expect("Failed to convert serial buffer to string")
+}
 
