@@ -87,7 +87,7 @@ pub enum BitfieldStyle {
 pub enum FieldType {
     /// Group of other types, typically used to describe a contiguous block of registers
     Set,
-    /// String type
+    /// String type; value is the length of the string in bytes.
     String(u64),
     /// Enumerated type
     Enum {
@@ -96,10 +96,10 @@ pub enum FieldType {
     },
     /// Bitfield with named indices
     Bitfield { length: u64, bits: BitfieldStyle },
-    /// Unsigned numeric type.
-    /// Defined by length and representing the vhdl type `signed(length-1 downto 0)`
+    /// Unsigned numeric type; value is length of the field in bits.
+    /// Defined by length and representing the vhdl type `signed(length-1 downto 0)`.
     Unsigned(u64),
-    /// Signed numeric type.
+    /// Signed numeric type; value is length of the field in bits.
     /// Defined by length and representing the vhdl type `unsigned(length-1 downto 0)`
     Signed(u64),
     /// Unsigned fixed point numeric type.
@@ -188,9 +188,18 @@ pub struct Field {
     /// FieldType::Set.
     #[serde(skip_serializing_if = "Option::is_none")]
     contains: Option<OneOrMoreField>,
-    /// The default value of the field
+    /// The default value of the field. Ignored for FieldType::Set
     #[serde(skip_serializing_if = "Option::is_none")]
     value: Option<Value>,
+    /// The unit of measurement of a numeric type. Ignored for other types.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unit: Option<String>,
+    /// The minimum allowed value of a numeric type. Ignored for other types.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    min: Option<f64>,
+    /// The maximum allowed value of a numeric type. Ignored for other types.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max: Option<f64>,
 }
 
 #[derive(Deserialize, Serialize, JsonSchema)]
