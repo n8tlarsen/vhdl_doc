@@ -7,8 +7,34 @@ addressMax = 0xFFFF_FFFF
 dataMin    = 1
 
 [contains]
-name    = "Description String"
-address = 0x0000
-value   = "My Great Memory Map"
-access  = "r"
-type    = { string = 20 }
+name     = "A nice group"
+address  = 0x0000
+access   = "r"
+type     = "set"
+
+[[contains.contains]]
+name  = "Description String"
+value = "My Great Memory Map"
+type.string = 20
+
+[[contains.contains]]
+name    = "A bitfield"
+access  = "rw"
+type.bitfield.length = 16
+[contains.contains.type.bitfield.bits]
+zero =  0
+one  =  1
+two  =  2
+ten  = 10
+
+[[contains.contains]]
+name    = "Another bitfield"
+access  = "rw"
+type.bitfield.length = 8
+type.bitfield.bits   = [
+    "item0",
+    "item1",
+    "item2",
+    "item3",
+]
+

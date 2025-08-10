@@ -7,10 +7,48 @@
     "name": "Example Memory Map",
     "type": "set",
     "contains": {
-        "name": "Description String",
-        "address": 0,
+        "name": "A nice group",
+        "address": "0x0000",
         "access": "r",
-        "type": { "string": 20 },
-        "value": "My Great Memory Map"
+        "type": "set",
+        "contains": [
+            {
+                "name": "Description String",
+                "type": {
+                    "string": 20
+                },
+                "value": "My Great Memory Map"
+            },
+            {
+                "name": "A bitfield",
+                "access": "rw",
+                "type": {
+                    "bitfield": {
+                        "length": 16,
+                        "bits": {
+                            "zero": 0,
+                            "one" : 1,
+                            "two" : 2,
+                            "ten" : 10
+                        }
+                    }
+                }
+            },
+            {
+                "name": "Another bitfield",
+                "access": "rw",
+                "type": {
+                    "bitfield": {
+                        "length": 8,
+                        "bits": [
+                            "item0",
+                            "item1",
+                            "item2",
+                            "item3"
+                        ]
+                    }
+                }
+            }
+        ]
     }
 }
