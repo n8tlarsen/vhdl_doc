@@ -1,7 +1,7 @@
+use image::{Rgb, RgbImage};
 use std::path::PathBuf;
-use image::{RgbImage, Rgb};
 
-pub fn make_symbol (doc_path: PathBuf) {
+pub fn make_symbol(doc_path: PathBuf) {
     let mut img = RgbImage::new(32, 32);
     for x in 15..=17 {
         for y in 8..24 {

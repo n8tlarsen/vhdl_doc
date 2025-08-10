@@ -3,7 +3,7 @@ type = "set"
 
 [protocol]
 name       = "Example Protocol"
-addressMax = 0xFFFF
+addressMax = 0xFFFF_FFFF
 dataMin    = 1
 
 [contains]

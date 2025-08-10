@@ -1,7 +1,7 @@
 {
     "protocol": {
         "name": "Example Protocol",
-        "addressMax": 65535,
+        "addressMax": "0xFFFF_FFFF",
         "dataMin": 1
     },
     "name": "Example Memory Map",

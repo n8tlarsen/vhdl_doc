@@ -1,7 +1,7 @@
 use clap::Parser;
 use std::{env, fs, path::PathBuf};
-use vhdl_doc::symbol::symbol::make_symbol;
 use vhdl_doc::memory_map::schema::get_memory_map_schema;
+use vhdl_doc::symbol::symbol::make_symbol;
 
 fn default_path(p: &str) -> PathBuf {
     let mut path = env::current_dir().unwrap();
@@ -24,4 +24,3 @@ fn main() {
     make_symbol(args.doc_path);
     println!("{}", get_memory_map_schema());
 }
-
