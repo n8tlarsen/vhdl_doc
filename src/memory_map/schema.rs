@@ -1,3 +1,4 @@
+use log::{debug, error, info, warn};
 use schemars::schema_for;
 use schemars::JsonSchema;
 use serde::de::Visitor;
@@ -172,7 +173,8 @@ pub struct Field {
     /// Memory address. If no address is provided, the renderer will assume the field
     /// is packed directly following the previously defined address. If padding is desired to
     /// ensure allignment to Protocol.data_min, and the data type is smaller than data_min, it is
-    /// required to explicitly specify the address.
+    /// required to explicitly specify the address. If no prior field exists, the renderer will
+    /// either inherit the address of the parent FieldType::Set or start at zero.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default, deserialize_with = "maybe_hex_str_or_unsigned")]
     address: Option<u64>,
@@ -200,6 +202,11 @@ pub struct Field {
     /// The maximum allowed value of a numeric type. Ignored for other types.
     #[serde(skip_serializing_if = "Option::is_none")]
     max: Option<f64>,
+    /// Rendered range. For sets, this is the minimum and maxiumum addresses contained within the
+    /// set. For numeric types this is the minimum and maximum values. For other types, this is a
+    /// description of possible values.
+    #[serde(skip_deserializing)]
+    range: String,
 }
 
 #[derive(Deserialize, Serialize, JsonSchema)]
@@ -207,6 +214,46 @@ pub struct MemoryMap {
     protocol: Protocol,
     #[serde(flatten)]
     field: Field,
+}
+
+struct Context {
+    access: Access,
+    address: u64,
+}
+
+impl Field {
+    fn render(&mut self, protocol: &Protocol, context: &mut Context) {
+        if self.address.is_none() {
+            info!("Assuming a base address of 0");
+            self.address = Some(0);
+        }
+        match &self.field_type {
+            FieldType::Set => {
+                if let Some(container) = &mut self.contains {
+                    match container {
+                        OneOrMoreField::One(field) => (**field).render(protocol, context),
+                        OneOrMoreField::More(fields) => {
+                            for field in fields.iter_mut() {
+                                (*field).render(protocol, context);
+                            }
+                        }
+                    }
+                } else {
+                    error!(
+                        "Schema error. Field type 'set' was provided, but key 'contains' was not."
+                    );
+                    return;
+                }
+            }
+            FieldType::String(length) => {}
+            FieldType::Enum { length, map } => {}
+            FieldType::Bitfield { length, bits } => {}
+            FieldType::Unsigned(length) => {}
+            FieldType::Signed(length) => {}
+            FieldType::UFixed { high, low } => {}
+            FieldType::SFixed { high, low } => {}
+        }
+    }
 }
 
 pub fn get_memory_map_schema() -> String {
