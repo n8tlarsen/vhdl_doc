@@ -2,11 +2,11 @@ use anyhow::anyhow;
 use log::{debug, error, info, warn};
 use schemars::schema_for;
 use schemars::JsonSchema;
+use serde::de::Error;
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::ser::PrettyFormatter;
 use std::collections::HashMap;
-use std::error::Error;
 use std::fmt;
 
 fn hex_str_or_unsigned<'de, D>(deserializer: D) -> Result<u64, D::Error>
@@ -147,9 +147,25 @@ pub enum OneOrMoreField {
     More(Vec<Field>),
 }
 
+fn ascii_only_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let string = String::deserialize(deserializer)?;
+    if string.is_ascii() {
+        Ok(string)
+    } else {
+        Err(D::Error::custom(format!(
+            "string {} contains non-ascii characters",
+            string
+        )))
+    }
+}
+
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum Value {
+    #[serde(deserialize_with = "ascii_only_string")]
     String(String),
     Unsigned(u64),
     Signed(i64),
@@ -238,11 +254,7 @@ impl Field {
                         }
                         OneOrMoreField::More(fields) => {
                             for field in fields.iter_mut() {
-                                let result =
-                                    (*field).render(protocol, parent_access, running_address);
-                                if result.is_err() {
-                                    return result;
-                                }
+                                (*field).render(protocol, parent_access, running_address)?;
                             }
                             Ok(())
                         }
@@ -278,14 +290,14 @@ impl Field {
             if let Value::String(string) = value {
                 if (string.len() as u64) > *length {
                     let error = anyhow!("provided string value is longer than the field type");
-                    error!("{}", error.to_string());
+                    error!("{}", error);
                     Err(error)
                 } else {
                     Ok(())
                 }
             } else {
                 let error = anyhow!("provided value doesn't match the field type");
-                error!("{}", error.to_string());
+                error!("{}", error);
                 Err(error)
             }
         } else {
