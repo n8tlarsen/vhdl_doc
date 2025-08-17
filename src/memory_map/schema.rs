@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use log::{debug, error, info, warn};
 use schemars::schema_for;
 use schemars::JsonSchema;
@@ -5,6 +6,7 @@ use serde::de::Visitor;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::ser::PrettyFormatter;
 use std::collections::HashMap;
+use std::error::Error;
 use std::fmt;
 
 fn hex_str_or_unsigned<'de, D>(deserializer: D) -> Result<u64, D::Error>
@@ -216,42 +218,78 @@ pub struct MemoryMap {
     field: Field,
 }
 
-struct Context {
-    access: Access,
-    address: u64,
-}
-
 impl Field {
-    fn render(&mut self, protocol: &Protocol, context: &mut Context) {
+    pub fn render(
+        &mut self,
+        protocol: &Protocol,
+        parent_access: &Access,
+        running_address: &mut u64,
+    ) -> Result<(), anyhow::Error> {
         if self.address.is_none() {
             info!("Assuming a base address of 0");
             self.address = Some(0);
         }
-        match &self.field_type {
+        match &mut self.field_type {
             FieldType::Set => {
                 if let Some(container) = &mut self.contains {
                     match container {
-                        OneOrMoreField::One(field) => (**field).render(protocol, context),
+                        OneOrMoreField::One(field) => {
+                            (**field).render(protocol, parent_access, running_address)
+                        }
                         OneOrMoreField::More(fields) => {
                             for field in fields.iter_mut() {
-                                (*field).render(protocol, context);
+                                let result =
+                                    (*field).render(protocol, parent_access, running_address);
+                                if result.is_err() {
+                                    return result;
+                                }
                             }
+                            Ok(())
                         }
                     }
                 } else {
-                    error!(
-                        "Schema error. Field type 'set' was provided, but key 'contains' was not."
+                    let error = anyhow!(
+                        "Schema error. Field type 'set' was provided, but key 'contains' was not"
                     );
-                    return;
+                    error!("{}", error.to_string());
+                    Err(error)
                 }
             }
-            FieldType::String(length) => {}
-            FieldType::Enum { length, map } => {}
-            FieldType::Bitfield { length, bits } => {}
-            FieldType::Unsigned(length) => {}
-            FieldType::Signed(length) => {}
-            FieldType::UFixed { high, low } => {}
-            FieldType::SFixed { high, low } => {}
+            &mut FieldType::String(length) => {
+                self.render_field_type_string(&length, protocol, parent_access, running_address)
+            }
+            FieldType::Enum { length, map } => Ok(()),
+            FieldType::Bitfield { length, bits } => Ok(()),
+            FieldType::Unsigned(length) => Ok(()),
+            FieldType::Signed(length) => Ok(()),
+            FieldType::UFixed { high, low } => Ok(()),
+            FieldType::SFixed { high, low } => Ok(()),
+        }
+    }
+
+    fn render_field_type_string(
+        &mut self,
+        length: &u64,
+        protocol: &Protocol,
+        parent_access: &Access,
+        running_address: &mut u64,
+    ) -> Result<(), anyhow::Error> {
+        if let Some(value) = &self.value {
+            if let Value::String(string) = value {
+                if (string.len() as u64) > *length {
+                    let error = anyhow!("provided string value is longer than the field type");
+                    error!("{}", error.to_string());
+                    Err(error)
+                } else {
+                    Ok(())
+                }
+            } else {
+                let error = anyhow!("provided value doesn't match the field type");
+                error!("{}", error.to_string());
+                Err(error)
+            }
+        } else {
+            Ok(())
         }
     }
 }
