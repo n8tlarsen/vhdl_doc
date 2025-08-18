@@ -1,10 +1,13 @@
 use anyhow::anyhow;
 use derive_more::Display;
-use log::{debug, error, info, warn};
+use log::error;
 use schemars::schema_for;
 use schemars::JsonSchema;
+#[cfg(test)]
 use serde::de::value::{Error as ValueError, I64Deserializer, StrDeserializer};
-use serde::de::{Error, IntoDeserializer, Unexpected, Visitor};
+#[cfg(test)]
+use serde::de::IntoDeserializer;
+use serde::de::{Error, Unexpected, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::ser::PrettyFormatter;
 use std::collections::HashMap;
@@ -16,7 +19,7 @@ where
 {
     struct HexVisitor;
 
-    impl<'de> Visitor<'de> for HexVisitor {
+    impl Visitor<'_> for HexVisitor {
         type Value = u64;
 
         fn expecting(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -333,7 +336,7 @@ impl Field {
                     self.validate_field_type_enum(length, map)?;
                     ((*length as f64) / 8f64).ceil() as u64
                 }
-                FieldType::Bitfield { length, bits } => {
+                FieldType::Bitfield { length, bits: _ } => {
                     self.validate_field_type_bitfield(length)?;
                     ((*length as f64) / 8f64).ceil() as u64
                 }
