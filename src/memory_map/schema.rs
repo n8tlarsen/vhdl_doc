@@ -173,7 +173,7 @@ pub enum FieldType {
     /// ```
     /// and results in the binary fixed point form 000000000000.0000 with a resolution of
     /// 2^{-4}, a maximum value of (2^{16-1} - 1) / (2^4), and a minimum value of
-    /// -(2^{16-1} - 1) / (2^4).
+    /// -(2^{16-1}) / (2^4).
     SFixed { high: i32, low: i32 },
 }
 
