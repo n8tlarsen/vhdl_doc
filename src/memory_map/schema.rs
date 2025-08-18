@@ -93,18 +93,20 @@ pub enum FieldType {
     /// String type; value is the length of the string in bytes.
     String(u64),
     /// Enumerated type
+    /// Represented by the vhdl type `std_logic_vector(length-1 downto 0)`
     Enum {
-        length: u64,
-        map: HashMap<String, u64>,
+        length: u32,
+        map: HashMap<String, u32>,
     },
     /// Bitfield with named indices
-    Bitfield { length: u64, bits: BitfieldStyle },
+    /// Represented by the vhdl type `std_logic_vector(length-1 downto 0)`
+    Bitfield { length: u32, bits: BitfieldStyle },
     /// Unsigned numeric type; value is length of the field in bits.
     /// Defined by length and representing the vhdl type `signed(length-1 downto 0)`.
-    Unsigned(u64),
+    Unsigned(u32),
     /// Signed numeric type; value is length of the field in bits.
     /// Defined by length and representing the vhdl type `unsigned(length-1 downto 0)`
-    Signed(u64),
+    Signed(u32),
     /// Unsigned fixed point numeric type.
     /// Defined by the high and low subscripts typically representing the vhdl type
     /// `ufixed(high downto low)`.
@@ -120,7 +122,7 @@ pub enum FieldType {
     /// ```
     /// and results in the binary fixed point form 000000000000.0000 with a resolution of
     /// 2^{-4}, a maximum value of (2^16 - 1) / (2^4), and a minimum value of 0.
-    UFixed { high: i64, low: i64 },
+    UFixed { high: i32, low: i32 },
     /// Signed fixed point numeric type.
     /// Defined by the high and low subscripts typically representing the vhdl type
     /// `sfixed(high downto low)`.
@@ -137,7 +139,7 @@ pub enum FieldType {
     /// and results in the binary fixed point form 000000000000.0000 with a resolution of
     /// 2^{-4}, a maximum value of (2^{16-1} - 1) / (2^4), and a minimum value of
     /// -(2^{16-1} - 1) / (2^4).
-    SFixed { high: i64, low: i64 },
+    SFixed { high: i32, low: i32 },
 }
 
 #[derive(Deserialize, Serialize, JsonSchema)]
@@ -172,9 +174,10 @@ pub enum Value {
     Float(f64),
 }
 
-#[derive(Deserialize, Serialize, JsonSchema)]
+#[derive(Deserialize, Serialize, JsonSchema, Default, Debug, Copy, Clone)]
 pub enum Access {
     /// Read-only access is permitted
+    #[default]
     #[serde(rename = "r")]
     Read,
     /// Write-only access is permitted
@@ -235,26 +238,34 @@ pub struct MemoryMap {
 }
 
 impl Field {
-    pub fn render(
+    pub fn render(&mut self, protocol: &Protocol) -> Result<(), anyhow::Error> {
+        self.render_recursive(
+            protocol,
+            &self.access.unwrap_or_default(),
+            &mut self.address.unwrap_or_default(),
+        )
+    }
+
+    fn render_recursive(
         &mut self,
         protocol: &Protocol,
         parent_access: &Access,
         running_address: &mut u64,
     ) -> Result<(), anyhow::Error> {
-        if self.address.is_none() {
-            info!("Assuming a base address of 0");
-            self.address = Some(0);
-        }
         match &mut self.field_type {
             FieldType::Set => {
                 if let Some(container) = &mut self.contains {
                     match container {
                         OneOrMoreField::One(field) => {
-                            (**field).render(protocol, parent_access, running_address)
+                            (**field).render_recursive(protocol, parent_access, running_address)
                         }
                         OneOrMoreField::More(fields) => {
                             for field in fields.iter_mut() {
-                                (*field).render(protocol, parent_access, running_address)?;
+                                (*field).render_recursive(
+                                    protocol,
+                                    parent_access,
+                                    running_address,
+                                )?;
                             }
                             Ok(())
                         }
@@ -263,7 +274,7 @@ impl Field {
                     let error = anyhow!(
                         "Schema error. Field type 'set' was provided, but key 'contains' was not"
                     );
-                    error!("{}", error.to_string());
+                    error!("{}", error);
                     Err(error)
                 }
             }
@@ -272,7 +283,9 @@ impl Field {
             }
             FieldType::Enum { length, map } => Ok(()),
             FieldType::Bitfield { length, bits } => Ok(()),
-            FieldType::Unsigned(length) => Ok(()),
+            &mut FieldType::Unsigned(length) => {
+                self.render_field_type_unsigned(&length, protocol, parent_access, running_address)
+            }
             FieldType::Signed(length) => Ok(()),
             FieldType::UFixed { high, low } => Ok(()),
             FieldType::SFixed { high, low } => Ok(()),
@@ -286,23 +299,98 @@ impl Field {
         parent_access: &Access,
         running_address: &mut u64,
     ) -> Result<(), anyhow::Error> {
+        // Validate the value and length
         if let Some(value) = &self.value {
             if let Value::String(string) = value {
                 if (string.len() as u64) > *length {
                     let error = anyhow!("provided string value is longer than the field type");
                     error!("{}", error);
-                    Err(error)
-                } else {
-                    Ok(())
+                    return Err(error);
                 }
             } else {
                 let error = anyhow!("provided value doesn't match the field type");
                 error!("{}", error);
-                Err(error)
+                return Err(error);
             }
-        } else {
-            Ok(())
         }
+        // Render access field
+        if self.access.is_none() {
+            self.access = Some(*parent_access)
+        }
+        // Update the addresses
+        let my_address = if self.address.is_some() {
+            self.address.unwrap()
+        } else {
+            self.address = Some(*running_address);
+            *running_address
+        };
+        if (my_address + *length) > protocol.address_max {
+            let error = anyhow!(format!(
+                "Field {} with address {} and length {} would overflow the protocol maximum address {}",
+                self.name,
+                my_address,
+                *length,
+                protocol.address_max,
+            ));
+            error!("{}", error);
+            return Err(error);
+        }
+        *running_address = my_address + *length;
+        Ok(())
+    }
+
+    fn render_field_type_unsigned(
+        &mut self,
+        length: &u32,
+        protocol: &Protocol,
+        parent_access: &Access,
+        running_address: &mut u64,
+    ) -> Result<(), anyhow::Error> {
+        // Validate the value and length
+        if let Some(value) = &self.value {
+            if let Value::Unsigned(number) = value {
+                if *number > 2u64.pow(*length) {
+                    let error = anyhow!(format!(
+                        "numeric value {} requires more than {} bits specified by the field type",
+                        *number, *length
+                    ));
+                    error!("{}", error);
+                    return Err(error);
+                }
+            } else {
+                let error = anyhow!("provided value doesn't match the field type");
+                error!("{}", error);
+                return Err(error);
+            }
+        }
+        // Render access field
+        if self.access.is_none() {
+            self.access = Some(*parent_access)
+        }
+        // Update the addresses
+        let my_address = if self.address.is_some() {
+            self.address.unwrap()
+        } else {
+            self.address = Some(*running_address);
+            *running_address
+        };
+        let mut bytes = ((*length as f32) / 8f32).ceil() as u32;
+        if bytes < protocol.data_min as u32 {
+            bytes = protocol.data_min as u32;
+        }
+        if (my_address + (bytes as u64)) > protocol.address_max {
+            let error = anyhow!(format!(
+                "Field {} with address {} and length {} would overflow the protocol maximum address {}",
+                self.name,
+                my_address,
+                *length,
+                protocol.address_max,
+            ));
+            error!("{}", error);
+            return Err(error);
+        }
+        *running_address = my_address + (bytes as u64);
+        Ok(())
     }
 }
 
