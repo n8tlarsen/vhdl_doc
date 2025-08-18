@@ -269,11 +269,6 @@ pub struct Field {
     /// The maximum allowed value of a numeric type. Ignored for other types.
     #[serde(skip_serializing_if = "Option::is_none")]
     max: Option<f64>,
-    /// Rendered range. For sets, this is the minimum and maxiumum addresses contained within the
-    /// set. For numeric types this is the minimum and maximum values. For other types, this is a
-    /// description of possible values.
-    #[serde(skip_deserializing)]
-    range: String,
 }
 
 #[derive(Deserialize, Serialize, JsonSchema)]
@@ -283,16 +278,22 @@ pub struct MemoryMap {
     field: Field,
 }
 
+impl MemoryMap {
+    pub fn elaborate(&mut self) -> Result<(), anyhow::Error> {
+        self.field.elaborate(&self.protocol)
+    }
+}
+
 impl Field {
-    pub fn render(&mut self, protocol: &Protocol) -> Result<(), anyhow::Error> {
-        self.render_recursive(
+    pub fn elaborate(&mut self, protocol: &Protocol) -> Result<(), anyhow::Error> {
+        self.elaborate_recursive(
             protocol,
             &self.access.unwrap_or_default(),
             &mut self.address.unwrap_or_default(),
         )
     }
 
-    fn render_recursive(
+    fn elaborate_recursive(
         &mut self,
         protocol: &Protocol,
         parent_access: &Access,
@@ -302,11 +303,15 @@ impl Field {
             if let Some(container) = &mut self.contains {
                 match container {
                     OneOrMoreField::One(field) => {
-                        (**field).render_recursive(protocol, parent_access, running_address)
+                        (**field).elaborate_recursive(protocol, parent_access, running_address)
                     }
                     OneOrMoreField::More(fields) => {
                         for field in fields.iter_mut() {
-                            (*field).render_recursive(protocol, parent_access, running_address)?;
+                            (*field).elaborate_recursive(
+                                protocol,
+                                parent_access,
+                                running_address,
+                            )?;
                         }
                         Ok(())
                     }
@@ -333,7 +338,6 @@ impl Field {
                     ((*length as f64) / 8f64).ceil() as u64
                 }
                 FieldType::Unsigned(length) => {
-                    // self.render_field_type_unsigned(&length, protocol, parent_access, running_address)
                     self.validate_field_type_unsigned(length)?;
                     ((*length as f64) / 8f64).ceil() as u64
                 }
@@ -356,16 +360,16 @@ impl Field {
             if self.access.is_none() {
                 self.access = Some(*parent_access)
             }
-            self.render_address(&byte_length, protocol, running_address)
+            self.elaborate_address(&byte_length, protocol, running_address)
         }
     }
 
-    /// Renders the address field and updates the running address.
-    /// If no address is provided, the renderer will assume the field is packed directly following
+    /// Elaborates the address field and updates the running address.
+    /// If no address is provided, the function will assume the field is packed directly following
     /// the previously defined address. If padding is desired to ensure allignment to
     /// Protocol.address_align, and the data type is smaller than address_align, it is required to
     /// explicitly specify the address.
-    fn render_address(
+    fn elaborate_address(
         &mut self,
         byte_length: &u64,
         protocol: &Protocol,

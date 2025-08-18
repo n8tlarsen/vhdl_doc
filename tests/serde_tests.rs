@@ -22,3 +22,16 @@ pub fn json_to_toml() {
         toml::to_string_pretty(&memory_map).expect("Failed to serialize to TOML string")
     );
 }
+
+#[test]
+pub fn toml_eval() {
+    let contents = fs::read_to_string("tests/assets/memory_map.json").expect("Failed to read file");
+    let mut memory_map: MemoryMap = serde_json::from_str(&contents).expect("Failed to parse JSON");
+    memory_map
+        .elaborate()
+        .expect("Failed to elaborate memory map for TOML document.");
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&memory_map).expect("Failed to serialize to JSON string")
+    );
+}
