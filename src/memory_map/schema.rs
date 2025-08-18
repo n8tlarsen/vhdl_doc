@@ -2,8 +2,8 @@ use anyhow::anyhow;
 use log::{debug, error, info, warn};
 use schemars::schema_for;
 use schemars::JsonSchema;
-use serde::de::Error;
-use serde::de::Visitor;
+use serde::de::value::{Error as ValueError, I64Deserializer, StrDeserializer};
+use serde::de::{Error, IntoDeserializer, Unexpected, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::ser::PrettyFormatter;
 use std::collections::HashMap;
@@ -19,14 +19,18 @@ where
         type Value = u64;
 
         fn expecting(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-            fmt.write_str("unsigned or string")
+            fmt.write_str("\"0x\" prefixed hex string or u64")
         }
 
         fn visit_i64<E>(self, val: i64) -> Result<Self::Value, E>
         where
             E: serde::de::Error,
         {
-            Ok(val as u64)
+            if val >= 0 {
+                Ok(val as u64)
+            } else {
+                Err(E::invalid_value(Unexpected::Signed(val), &self))
+            }
         }
 
         fn visit_u64<E>(self, val: u64) -> Result<Self::Value, E>
@@ -40,19 +44,50 @@ where
         where
             E: serde::de::Error,
         {
+            let error = E::invalid_value(Unexpected::Str(val), &self);
             if let Some(stripped) = val.strip_prefix("0x") {
                 let deformat = stripped.to_string().replace("_", "");
                 match u64::from_str_radix(&deformat, 16) {
                     Ok(parsed_int) => Ok(parsed_int),
-                    Err(_) => Err(E::custom("failed to parse hex string")),
+                    Err(_) => Err(error),
                 }
             } else {
-                Err(E::custom("failed to parse hex string"))
+                Err(error)
             }
         }
     }
 
     deserializer.deserialize_any(HexVisitor)
+}
+
+#[test]
+fn test_hex_str_ok() {
+    let deserializer: StrDeserializer<ValueError> = "0xffff".into_deserializer();
+    assert_eq!(hex_str_or_unsigned(deserializer), Ok(65535));
+}
+
+#[test]
+fn test_hex_str_err() {
+    let deserializer: StrDeserializer<ValueError> = "ffff".into_deserializer();
+    assert_eq!(
+        hex_str_or_unsigned(deserializer).unwrap_err().to_string(),
+        "invalid value: string \"ffff\", expected \"0x\" prefixed hex string or u64"
+    );
+}
+
+#[test]
+fn test_negative_i64_err() {
+    let deserializer: I64Deserializer<ValueError> = (-1i64).into_deserializer();
+    assert_eq!(
+        hex_str_or_unsigned(deserializer).unwrap_err().to_string(),
+        "invalid value: integer `-1`, expected \"0x\" prefixed hex string or u64"
+    );
+}
+
+#[test]
+fn test_positive_i64_ok() {
+    let deserializer: I64Deserializer<ValueError> = (1i64).into_deserializer();
+    assert_eq!(hex_str_or_unsigned(deserializer), Ok(1));
 }
 
 fn maybe_hex_str_or_unsigned<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
