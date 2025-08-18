@@ -137,7 +137,7 @@ pub enum FieldType {
     #[display("Enum length {}", length)]
     Enum {
         length: u32,
-        map: HashMap<String, u32>,
+        map: HashMap<String, u64>,
     },
     /// Bitfield with named indices
     /// Represented by the vhdl type `std_logic_vector(length-1 downto 0)`
@@ -298,49 +298,65 @@ impl Field {
         parent_access: &Access,
         running_address: &mut u64,
     ) -> Result<(), anyhow::Error> {
-        match &mut self.field_type {
-            FieldType::Set => {
-                if let Some(container) = &mut self.contains {
-                    match container {
-                        OneOrMoreField::One(field) => {
-                            (**field).render_recursive(protocol, parent_access, running_address)
-                        }
-                        OneOrMoreField::More(fields) => {
-                            for field in fields.iter_mut() {
-                                (*field).render_recursive(
-                                    protocol,
-                                    parent_access,
-                                    running_address,
-                                )?;
-                            }
-                            Ok(())
-                        }
+        if let FieldType::Set = &self.field_type {
+            if let Some(container) = &mut self.contains {
+                match container {
+                    OneOrMoreField::One(field) => {
+                        (**field).render_recursive(protocol, parent_access, running_address)
                     }
-                } else {
-                    let error = anyhow!(
-                        "Schema error. Field type 'set' was provided, but key 'contains' was not"
-                    );
-                    error!("{}", error);
-                    Err(error)
+                    OneOrMoreField::More(fields) => {
+                        for field in fields.iter_mut() {
+                            (*field).render_recursive(protocol, parent_access, running_address)?;
+                        }
+                        Ok(())
+                    }
                 }
+            } else {
+                let error = anyhow!(
+                    "Schema error. Field type 'set' was provided, but key 'contains' was not"
+                );
+                error!("{}", error);
+                Err(error)
             }
-            &mut FieldType::String(length) => {
-                self.render_field_type_string(&length, protocol, parent_access, running_address)
+        } else {
+            let byte_length = match &self.field_type {
+                FieldType::String(length) => {
+                    self.validate_field_type_string(length)?;
+                    *length
+                }
+                FieldType::Enum { length, map } => {
+                    self.validate_field_type_enum(length, map)?;
+                    ((*length as f64) / 8f64).ceil() as u64
+                }
+                FieldType::Bitfield { length, bits } => {
+                    self.validate_field_type_bitfield(length)?;
+                    ((*length as f64) / 8f64).ceil() as u64
+                }
+                FieldType::Unsigned(length) => {
+                    // self.render_field_type_unsigned(&length, protocol, parent_access, running_address)
+                    self.validate_field_type_unsigned(length)?;
+                    ((*length as f64) / 8f64).ceil() as u64
+                }
+                FieldType::Signed(length) => {
+                    self.validate_field_type_signed(length)?;
+                    ((*length as f64) / 8f64).ceil() as u64
+                }
+                FieldType::UFixed { high, low } => {
+                    self.validate_field_type_ufixed(high, low)?;
+                    (((*high - *low + 1) as f64) / 8f64).ceil() as u64
+                }
+                FieldType::SFixed { high, low } => {
+                    self.validate_field_type_sfixed(high, low)?;
+                    (((*high - *low + 1) as f64) / 8f64).ceil() as u64
+                }
+                FieldType::Set => {
+                    panic!()
+                }
+            };
+            if self.access.is_none() {
+                self.access = Some(*parent_access)
             }
-            FieldType::Enum { length, map } => Ok(()),
-            FieldType::Bitfield { length, bits } => Ok(()),
-            &mut FieldType::Unsigned(length) => {
-                self.render_field_type_unsigned(&length, protocol, parent_access, running_address)
-            }
-            &mut FieldType::Signed(length) => {
-                self.render_field_type_signed(&length, protocol, parent_access, running_address)
-            }
-            &mut FieldType::UFixed { high, low } => {
-                self.render_field_type_ufixed(&high, &low, protocol, parent_access, running_address)
-            }
-            &mut FieldType::SFixed { high, low } => {
-                self.render_field_type_ufixed(&high, &low, protocol, parent_access, running_address)
-            }
+            self.render_address(&byte_length, protocol, running_address)
         }
     }
 
@@ -380,13 +396,7 @@ impl Field {
         Ok(())
     }
 
-    fn render_field_type_string(
-        &mut self,
-        length: &u64,
-        protocol: &Protocol,
-        parent_access: &Access,
-        running_address: &mut u64,
-    ) -> Result<(), anyhow::Error> {
+    fn validate_field_type_string(&self, length: &u64) -> Result<(), anyhow::Error> {
         // Validate the value and length
         if let Some(value) = &self.value {
             if let Value::String(string) = value {
@@ -404,19 +414,81 @@ impl Field {
                 return Err(error);
             }
         }
-        if self.access.is_none() {
-            self.access = Some(*parent_access)
-        }
-        self.render_address(length, protocol, running_address)
+        Ok(())
     }
 
-    fn render_field_type_unsigned(
-        &mut self,
+    fn validate_field_type_enum(
+        &self,
         length: &u32,
-        protocol: &Protocol,
-        parent_access: &Access,
-        running_address: &mut u64,
+        map: &HashMap<String, u64>,
     ) -> Result<(), anyhow::Error> {
+        if let Some(value) = &self.value {
+            match value {
+                Value::Unsigned(number) => {
+                    if *number > 2u64.pow(*length) - 1 {
+                        let error = anyhow!(format!(
+                            "Numeric value {} requires more than {} bits specified by the field type",
+                            *number, *length
+                        ));
+                        error!("{}", error);
+                        return Err(error);
+                    }
+                    if !(map.values().any(|&x| x == *number)) {
+                        let error = anyhow!(format!(
+                            "Numeric value {} is not a value specified by the enum field type of field {}",
+                            *number, self.name
+                        ));
+                        error!("{}", error);
+                        return Err(error);
+                    }
+                }
+                Value::String(string) => {
+                    if !(map.contains_key(string)) {
+                        let error = anyhow!(format!(
+                            "String value {} is not a key specified by the enum field type of field {}",
+                            *string, self.name
+                        ));
+                        error!("{}", error);
+                        return Err(error);
+                    }
+                }
+                _ => {
+                    let error = anyhow!(format!(
+                        "Provided value {} doesn't match the field type {}",
+                        value, &self.field_type
+                    ));
+                    error!("{}", error);
+                    return Err(error);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_field_type_bitfield(&self, length: &u32) -> Result<(), anyhow::Error> {
+        if let Some(value) = &self.value {
+            if let Value::Unsigned(number) = value {
+                if *number > 2u64.pow(*length) - 1 {
+                    let error = anyhow!(format!(
+                        "Numeric value {} requires more than {} bits specified by the field type",
+                        *number, *length
+                    ));
+                    error!("{}", error);
+                    return Err(error);
+                }
+            } else {
+                let error = anyhow!(format!(
+                    "Provided value {} doesn't match the field type {}",
+                    value, &self.field_type
+                ));
+                error!("{}", error);
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_field_type_unsigned(&self, length: &u32) -> Result<(), anyhow::Error> {
         // Validate the value and length
         if let Some(value) = &self.value {
             if let Value::Unsigned(number) = value {
@@ -437,20 +509,10 @@ impl Field {
                 return Err(error);
             }
         }
-        if self.access.is_none() {
-            self.access = Some(*parent_access)
-        }
-        let length = ((*length as f64) / 8f64).ceil() as u64;
-        self.render_address(&length, protocol, running_address)
+        Ok(())
     }
 
-    fn render_field_type_signed(
-        &mut self,
-        length: &u32,
-        protocol: &Protocol,
-        parent_access: &Access,
-        running_address: &mut u64,
-    ) -> Result<(), anyhow::Error> {
+    fn validate_field_type_signed(&self, length: &u32) -> Result<(), anyhow::Error> {
         // Validate the value and length
         if let Some(value) = &self.value {
             if let Value::Signed(number) = value {
@@ -471,21 +533,10 @@ impl Field {
                 return Err(error);
             }
         }
-        if self.access.is_none() {
-            self.access = Some(*parent_access)
-        }
-        let length = ((*length as f64) / 8f64).ceil() as u64;
-        self.render_address(&length, protocol, running_address)
+        Ok(())
     }
 
-    fn render_field_type_ufixed(
-        &mut self,
-        high: &i32,
-        low: &i32,
-        protocol: &Protocol,
-        parent_access: &Access,
-        running_address: &mut u64,
-    ) -> Result<(), anyhow::Error> {
+    fn validate_field_type_ufixed(&self, high: &i32, low: &i32) -> Result<(), anyhow::Error> {
         // Validate the value and length
         if let Some(value) = &self.value {
             if let Value::Float(number) = value {
@@ -507,21 +558,10 @@ impl Field {
                 return Err(error);
             }
         }
-        if self.access.is_none() {
-            self.access = Some(*parent_access)
-        }
-        let length = (((*high - *low + 1) as f64) / 8f64).ceil() as u64;
-        self.render_address(&length, protocol, running_address)
+        Ok(())
     }
 
-    fn render_field_type_sfixed(
-        &mut self,
-        high: &i32,
-        low: &i32,
-        protocol: &Protocol,
-        parent_access: &Access,
-        running_address: &mut u64,
-    ) -> Result<(), anyhow::Error> {
+    fn validate_field_type_sfixed(&self, high: &i32, low: &i32) -> Result<(), anyhow::Error> {
         // Validate the value and length
         if let Some(value) = &self.value {
             if let Value::Float(number) = value {
@@ -544,11 +584,7 @@ impl Field {
                 return Err(error);
             }
         }
-        if self.access.is_none() {
-            self.access = Some(*parent_access)
-        }
-        let length = (((*high - *low + 1) as f64) / 8f64).ceil() as u64;
-        self.render_address(&length, protocol, running_address)
+        Ok(())
     }
 }
 

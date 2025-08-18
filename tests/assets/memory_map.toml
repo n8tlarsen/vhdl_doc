@@ -2,9 +2,10 @@ name = "Example Memory Map"
 type = "set"
 
 [protocol]
-name       = "Example Protocol"
-addressMax = 0xFFFF_FFFF
-dataMin    = 1
+name         = "Example Protocol"
+addressMax   = 0xFFFF_FFFF
+addressUnit  = 1
+addressAlign = 4
 
 [contains]
 name     = "A nice group"

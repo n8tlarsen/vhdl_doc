@@ -2,7 +2,8 @@
     "protocol": {
         "name": "Example Protocol",
         "addressMax": "0xFFFF_FFFF",
-        "dataMin": 1
+        "addressUnit": 1,
+        "addressAlign": 4
     },
     "name": "Example Memory Map",
     "type": "set",
