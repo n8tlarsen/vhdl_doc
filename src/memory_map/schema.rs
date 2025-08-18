@@ -1,4 +1,5 @@
 use anyhow::anyhow;
+use derive_more::Display;
 use log::{debug, error, info, warn};
 use schemars::schema_for;
 use schemars::JsonSchema;
@@ -120,27 +121,32 @@ pub enum BitfieldStyle {
     Discrete(HashMap<String, u64>),
 }
 
-#[derive(Deserialize, Serialize, JsonSchema)]
+#[derive(Deserialize, Serialize, JsonSchema, Display)]
 #[serde(rename_all = "lowercase")]
 pub enum FieldType {
     /// Group of other types, typically used to describe a contiguous block of registers
     Set,
     /// String type; value is the length of the string in bytes.
+    #[display("string({} downto 1)", _0)]
     String(u64),
     /// Enumerated type
     /// Represented by the vhdl type `std_logic_vector(length-1 downto 0)`
+    #[display("Enum length {}", length)]
     Enum {
         length: u32,
         map: HashMap<String, u32>,
     },
     /// Bitfield with named indices
     /// Represented by the vhdl type `std_logic_vector(length-1 downto 0)`
+    #[display("Bitfield length {}", length)]
     Bitfield { length: u32, bits: BitfieldStyle },
     /// Unsigned numeric type; value is length of the field in bits.
     /// Defined by length and representing the vhdl type `signed(length-1 downto 0)`.
+    #[display("unsigned({} downto 0)", _0-1)]
     Unsigned(u32),
     /// Signed numeric type; value is length of the field in bits.
     /// Defined by length and representing the vhdl type `unsigned(length-1 downto 0)`
+    #[display("signed({} downto 0)", _0-1)]
     Signed(u32),
     /// Unsigned fixed point numeric type.
     /// Defined by the high and low subscripts typically representing the vhdl type
@@ -157,6 +163,7 @@ pub enum FieldType {
     /// ```
     /// and results in the binary fixed point form 000000000000.0000 with a resolution of
     /// 2^{-4}, a maximum value of (2^16 - 1) / (2^4), and a minimum value of 0.
+    #[display("ufixed({} downto {})", high, low)]
     UFixed { high: i32, low: i32 },
     /// Signed fixed point numeric type.
     /// Defined by the high and low subscripts typically representing the vhdl type
@@ -174,6 +181,7 @@ pub enum FieldType {
     /// and results in the binary fixed point form 000000000000.0000 with a resolution of
     /// 2^{-4}, a maximum value of (2^{16-1} - 1) / (2^4), and a minimum value of
     /// -(2^{16-1}) / (2^4).
+    #[display("sfixed({} downto {})", high, low)]
     SFixed { high: i32, low: i32 },
 }
 
@@ -199,7 +207,7 @@ where
     }
 }
 
-#[derive(Deserialize, Serialize, JsonSchema)]
+#[derive(Deserialize, Serialize, JsonSchema, Display)]
 #[serde(untagged)]
 pub enum Value {
     #[serde(deserialize_with = "ascii_only_string")]
@@ -321,8 +329,12 @@ impl Field {
             &mut FieldType::Unsigned(length) => {
                 self.render_field_type_unsigned(&length, protocol, parent_access, running_address)
             }
-            FieldType::Signed(length) => Ok(()),
-            FieldType::UFixed { high, low } => Ok(()),
+            &mut FieldType::Signed(length) => {
+                self.render_field_type_signed(&length, protocol, parent_access, running_address)
+            }
+            &mut FieldType::UFixed { high, low } => {
+                self.render_field_type_ufixed(&high, &low, protocol, parent_access, running_address)
+            }
             FieldType::SFixed { high, low } => Ok(()),
         }
     }
@@ -338,12 +350,15 @@ impl Field {
         if let Some(value) = &self.value {
             if let Value::String(string) = value {
                 if (string.len() as u64) > *length {
-                    let error = anyhow!("provided string value is longer than the field type");
+                    let error = anyhow!("Provided string value is longer than the field type");
                     error!("{}", error);
                     return Err(error);
                 }
             } else {
-                let error = anyhow!("provided value doesn't match the field type");
+                let error = anyhow!(format!(
+                    "Provided value {} doesn't match the field type {}",
+                    value, &self.field_type
+                ));
                 error!("{}", error);
                 return Err(error);
             }
@@ -384,16 +399,19 @@ impl Field {
         // Validate the value and length
         if let Some(value) = &self.value {
             if let Value::Unsigned(number) = value {
-                if *number > 2u64.pow(*length) {
+                if *number > 2u64.pow(*length) - 1 {
                     let error = anyhow!(format!(
-                        "numeric value {} requires more than {} bits specified by the field type",
+                        "Numeric value {} requires more than {} bits specified by the field type",
                         *number, *length
                     ));
                     error!("{}", error);
                     return Err(error);
                 }
             } else {
-                let error = anyhow!("provided value doesn't match the field type");
+                let error = anyhow!(format!(
+                    "Provided value {} doesn't match the field type {}",
+                    value, &self.field_type
+                ));
                 error!("{}", error);
                 return Err(error);
             }
@@ -409,7 +427,7 @@ impl Field {
             self.address = Some(*running_address);
             *running_address
         };
-        let mut bytes = ((*length as f32) / 8f32).ceil() as u32;
+        let mut bytes = ((*length as f64) / 8f64).ceil() as u32;
         if bytes < protocol.data_min as u32 {
             bytes = protocol.data_min as u32;
         }
@@ -425,6 +443,123 @@ impl Field {
             return Err(error);
         }
         *running_address = my_address + (bytes as u64);
+        Ok(())
+    }
+
+    fn render_field_type_signed(
+        &mut self,
+        length: &u32,
+        protocol: &Protocol,
+        parent_access: &Access,
+        running_address: &mut u64,
+    ) -> Result<(), anyhow::Error> {
+        // Validate the value and length
+        if let Some(value) = &self.value {
+            if let Value::Signed(number) = value {
+                if (*number > 2i64.pow(*length - 1) - 1) || (*number < -2i64.pow(*length - 1)) {
+                    let error = anyhow!(format!(
+                        "Numeric value {} requires more than {} bits specified by the field type",
+                        *number, *length
+                    ));
+                    error!("{}", error);
+                    return Err(error);
+                }
+            } else {
+                let error = anyhow!(format!(
+                    "Provided value {} doesn't match the field type {}",
+                    value, &self.field_type
+                ));
+                error!("{}", error);
+                return Err(error);
+            }
+        }
+        // Render access field
+        if self.access.is_none() {
+            self.access = Some(*parent_access)
+        }
+        // Update the addresses
+        let my_address = if self.address.is_some() {
+            self.address.unwrap()
+        } else {
+            self.address = Some(*running_address);
+            *running_address
+        };
+        let mut bytes = ((*length as f64) / 8f64).ceil() as u32;
+        if bytes < protocol.data_min as u32 {
+            bytes = protocol.data_min as u32;
+        }
+        if (my_address + (bytes as u64)) > protocol.address_max {
+            let error = anyhow!(format!(
+                "Field {} with address {} and length {} would overflow the protocol maximum address {}",
+                self.name,
+                my_address,
+                *length,
+                protocol.address_max,
+            ));
+            error!("{}", error);
+            return Err(error);
+        }
+        *running_address = my_address + (bytes as u64);
+        Ok(())
+    }
+
+    fn render_field_type_ufixed(
+        &mut self,
+        high: &i32,
+        low: &i32,
+        protocol: &Protocol,
+        parent_access: &Access,
+        running_address: &mut u64,
+    ) -> Result<(), anyhow::Error> {
+        // Validate the value and length
+        if let Some(value) = &self.value {
+            if let Value::Float(number) = value {
+                let max = 2f64.powf(*high as f64) - 2f64.powf(*low as f64);
+                if *number > max {
+                    let error = anyhow!(format!(
+                        "Numeric value {} cannot be represented by the field type {}",
+                        *number, &self.field_type
+                    ));
+                    error!("{}", error);
+                    return Err(error);
+                }
+            } else {
+                let error = anyhow!(format!(
+                    "Provided value {} doesn't match the field type unsigned",
+                    value,
+                ));
+                error!("{}", error);
+                return Err(error);
+            }
+        }
+        // Render access field
+        if self.access.is_none() {
+            self.access = Some(*parent_access)
+        }
+        // Update the addresses
+        let my_address = if self.address.is_some() {
+            self.address.unwrap()
+        } else {
+            self.address = Some(*running_address);
+            *running_address
+        };
+        let length = *high - *low + 1;
+        let mut bytes = ((length as f64) / 8f64).ceil() as u64;
+        if bytes < protocol.data_min as u64 {
+            bytes = protocol.data_min as u64;
+        }
+        if (my_address + bytes) > protocol.address_max {
+            let error = anyhow!(format!(
+                "Field {} with address {} and type {} would overflow the protocol maximum address {}",
+                self.name,
+                my_address,
+                &self.field_type,
+                protocol.address_max,
+            ));
+            error!("{}", error);
+            return Err(error);
+        }
+        *running_address = my_address + bytes;
         Ok(())
     }
 }
