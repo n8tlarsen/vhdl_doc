@@ -103,12 +103,15 @@ where
 pub struct Protocol {
     /// An optional name for the protocol
     name: Option<String>,
-    /// Maximum address in terms of dataMin.
+    /// Maximum address in terms of addressUnit.
     /// Accepts '0x' prefixed hex strings with underscores allowed between digits to enhance readability
     #[serde(deserialize_with = "hex_str_or_unsigned")]
     address_max: u64,
-    /// Minimum addressable data size in bytes
-    data_min: u8,
+    /// Number of bytes accessed with one address
+    address_unit: u64,
+    /// Number of bytes aligned with the protocol's minimum transfer size. Must be greater or equal
+    /// to addressUnit
+    address_align: u64,
 }
 
 #[derive(Deserialize, Serialize, JsonSchema)]
@@ -236,7 +239,7 @@ pub struct Field {
     name: String,
     /// Memory address. If no address is provided, the renderer will assume the field
     /// is packed directly following the previously defined address. If padding is desired to
-    /// ensure allignment to Protocol.data_min, and the data type is smaller than data_min, it is
+    /// ensure allignment to Protocol.address_align, and the data type is smaller than address_align, it is
     /// required to explicitly specify the address. If no prior field exists, the renderer will
     /// either inherit the address of the parent FieldType::Set or start at zero.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -335,8 +338,46 @@ impl Field {
             &mut FieldType::UFixed { high, low } => {
                 self.render_field_type_ufixed(&high, &low, protocol, parent_access, running_address)
             }
-            FieldType::SFixed { high, low } => Ok(()),
+            &mut FieldType::SFixed { high, low } => {
+                self.render_field_type_ufixed(&high, &low, protocol, parent_access, running_address)
+            }
         }
+    }
+
+    /// Renders the address field and updates the running address.
+    /// If no address is provided, the renderer will assume the field is packed directly following
+    /// the previously defined address. If padding is desired to ensure allignment to
+    /// Protocol.address_align, and the data type is smaller than address_align, it is required to
+    /// explicitly specify the address.
+    fn render_address(
+        &mut self,
+        byte_length: &u64,
+        protocol: &Protocol,
+        running_address: &mut u64,
+    ) -> Result<(), anyhow::Error> {
+        if self.address.is_none() {
+            self.address = Some(*running_address);
+        }
+        let my_address = &self.address.unwrap();
+        let modulo = *byte_length % protocol.address_unit;
+        let field_length = if modulo == 0 {
+            *byte_length
+        } else {
+            *byte_length + (protocol.address_unit - modulo)
+        };
+        if (*my_address + field_length - 1) > protocol.address_max {
+            let error = anyhow!(format!(
+                "Field {} with address {} and length {} would overflow the protocol maximum address {}",
+                self.name,
+                *my_address,
+                field_length,
+                protocol.address_max,
+            ));
+            error!("{}", error);
+            return Err(error);
+        }
+        *running_address = *my_address + field_length;
+        Ok(())
     }
 
     fn render_field_type_string(
@@ -363,30 +404,10 @@ impl Field {
                 return Err(error);
             }
         }
-        // Render access field
         if self.access.is_none() {
             self.access = Some(*parent_access)
         }
-        // Update the addresses
-        let my_address = if self.address.is_some() {
-            self.address.unwrap()
-        } else {
-            self.address = Some(*running_address);
-            *running_address
-        };
-        if (my_address + *length) > protocol.address_max {
-            let error = anyhow!(format!(
-                "Field {} with address {} and length {} would overflow the protocol maximum address {}",
-                self.name,
-                my_address,
-                *length,
-                protocol.address_max,
-            ));
-            error!("{}", error);
-            return Err(error);
-        }
-        *running_address = my_address + *length;
-        Ok(())
+        self.render_address(length, protocol, running_address)
     }
 
     fn render_field_type_unsigned(
@@ -416,34 +437,11 @@ impl Field {
                 return Err(error);
             }
         }
-        // Render access field
         if self.access.is_none() {
             self.access = Some(*parent_access)
         }
-        // Update the addresses
-        let my_address = if self.address.is_some() {
-            self.address.unwrap()
-        } else {
-            self.address = Some(*running_address);
-            *running_address
-        };
-        let mut bytes = ((*length as f64) / 8f64).ceil() as u32;
-        if bytes < protocol.data_min as u32 {
-            bytes = protocol.data_min as u32;
-        }
-        if (my_address + (bytes as u64)) > protocol.address_max {
-            let error = anyhow!(format!(
-                "Field {} with address {} and length {} would overflow the protocol maximum address {}",
-                self.name,
-                my_address,
-                *length,
-                protocol.address_max,
-            ));
-            error!("{}", error);
-            return Err(error);
-        }
-        *running_address = my_address + (bytes as u64);
-        Ok(())
+        let length = ((*length as f64) / 8f64).ceil() as u64;
+        self.render_address(&length, protocol, running_address)
     }
 
     fn render_field_type_signed(
@@ -473,34 +471,11 @@ impl Field {
                 return Err(error);
             }
         }
-        // Render access field
         if self.access.is_none() {
             self.access = Some(*parent_access)
         }
-        // Update the addresses
-        let my_address = if self.address.is_some() {
-            self.address.unwrap()
-        } else {
-            self.address = Some(*running_address);
-            *running_address
-        };
-        let mut bytes = ((*length as f64) / 8f64).ceil() as u32;
-        if bytes < protocol.data_min as u32 {
-            bytes = protocol.data_min as u32;
-        }
-        if (my_address + (bytes as u64)) > protocol.address_max {
-            let error = anyhow!(format!(
-                "Field {} with address {} and length {} would overflow the protocol maximum address {}",
-                self.name,
-                my_address,
-                *length,
-                protocol.address_max,
-            ));
-            error!("{}", error);
-            return Err(error);
-        }
-        *running_address = my_address + (bytes as u64);
-        Ok(())
+        let length = ((*length as f64) / 8f64).ceil() as u64;
+        self.render_address(&length, protocol, running_address)
     }
 
     fn render_field_type_ufixed(
@@ -515,7 +490,7 @@ impl Field {
         if let Some(value) = &self.value {
             if let Value::Float(number) = value {
                 let max = 2f64.powf(*high as f64) - 2f64.powf(*low as f64);
-                if *number > max {
+                if (*number > max) || (*number < 0f64) {
                     let error = anyhow!(format!(
                         "Numeric value {} cannot be represented by the field type {}",
                         *number, &self.field_type
@@ -532,35 +507,48 @@ impl Field {
                 return Err(error);
             }
         }
-        // Render access field
         if self.access.is_none() {
             self.access = Some(*parent_access)
         }
-        // Update the addresses
-        let my_address = if self.address.is_some() {
-            self.address.unwrap()
-        } else {
-            self.address = Some(*running_address);
-            *running_address
-        };
-        let length = *high - *low + 1;
-        let mut bytes = ((length as f64) / 8f64).ceil() as u64;
-        if bytes < protocol.data_min as u64 {
-            bytes = protocol.data_min as u64;
+        let length = (((*high - *low + 1) as f64) / 8f64).ceil() as u64;
+        self.render_address(&length, protocol, running_address)
+    }
+
+    fn render_field_type_sfixed(
+        &mut self,
+        high: &i32,
+        low: &i32,
+        protocol: &Protocol,
+        parent_access: &Access,
+        running_address: &mut u64,
+    ) -> Result<(), anyhow::Error> {
+        // Validate the value and length
+        if let Some(value) = &self.value {
+            if let Value::Float(number) = value {
+                let max = 2f64.powf((*high - 1) as f64) - 2f64.powf(*low as f64);
+                let min = -2f64.powf((*high - 1) as f64);
+                if (*number > max) || (*number < min) {
+                    let error = anyhow!(format!(
+                        "Numeric value {} cannot be represented by the field type {}",
+                        *number, &self.field_type
+                    ));
+                    error!("{}", error);
+                    return Err(error);
+                }
+            } else {
+                let error = anyhow!(format!(
+                    "Provided value {} doesn't match the field type unsigned",
+                    value,
+                ));
+                error!("{}", error);
+                return Err(error);
+            }
         }
-        if (my_address + bytes) > protocol.address_max {
-            let error = anyhow!(format!(
-                "Field {} with address {} and type {} would overflow the protocol maximum address {}",
-                self.name,
-                my_address,
-                &self.field_type,
-                protocol.address_max,
-            ));
-            error!("{}", error);
-            return Err(error);
+        if self.access.is_none() {
+            self.access = Some(*parent_access)
         }
-        *running_address = my_address + bytes;
-        Ok(())
+        let length = (((*high - *low + 1) as f64) / 8f64).ceil() as u64;
+        self.render_address(&length, protocol, running_address)
     }
 }
 
