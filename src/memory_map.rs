@@ -9,13 +9,13 @@ pub use field::Field;
 pub use protocol::Protocol;
 pub use serde_helpers::{DisplayOption, EnumMap, HexStrOrUnsigned, IntegerOrString};
 
-use anyhow::anyhow;
 use derive_more::Display;
 use schemars::{schema_for, JsonSchema};
 use serde::{Deserialize, Serialize};
 use serde_json::ser::PrettyFormatter;
 use serde_with::{formats::PreferOne, serde_as, DefaultOnNull, OneOrMany};
 use std::collections::{BTreeMap, HashMap};
+use std::fmt;
 
 #[derive(Deserialize, Serialize, JsonSchema, Display, Default, Debug, Copy, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -35,6 +35,73 @@ pub enum Access {
     ReadWrite,
 }
 
+#[derive(Debug, Clone)]
+pub struct ResolveError {
+    message: String,
+}
+
+impl ResolveError {
+    fn duplicate<T>(_first: T, second: T) -> Self
+    where
+        T: Name,
+    {
+        let info = match second.type_name() {
+            "Cluster" => " Resolve the conflict or consider using a reference.",
+            _ => "",
+        };
+        ResolveError {
+            message: format!(
+                "Found duplicate {} instances with name \"{}\".{}",
+                second.type_name().to_lowercase(),
+                second.name(),
+                info
+            ),
+        }
+    }
+    fn duplicate_entry_table(name: &str) -> Self {
+        ResolveError {
+            message: format!("Found duplicate cluster name \"{}\". Resolve the conflict or consider using a reference.", name),
+        }
+    }
+    fn duplicate_field_table(name: &str) -> Self {
+        ResolveError {
+            message: format!("Found duplicate entry name \"{}\". Resolve the conflict or consider using a reference.", name),
+        }
+    }
+    fn nonexist_entry_table(name: &str) -> Self {
+        ResolveError {
+            message: format!(
+                "Internal error while adding entry; cluster name \"{}\" does not exist.",
+                name
+            ),
+        }
+    }
+    fn nonexist_field_table(name: &str) -> Self {
+        ResolveError {
+            message: format!(
+                "Internal error while adding field; entry name \"{}\" does not exist.",
+                name
+            ),
+        }
+    }
+    fn def_not_found(item: String) -> Self {
+        ResolveError {
+            message: format!("Definition {} not found in document", item),
+        }
+    }
+    fn map_not_found(item: String) -> Self {
+        ResolveError {
+            message: format!("Map file {} not found", item),
+        }
+    }
+}
+
+impl fmt::Display for ResolveError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
 #[serde_as]
 #[derive(Deserialize, Serialize, JsonSchema, Debug)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -51,11 +118,12 @@ pub struct MemoryMap {
 }
 
 impl MemoryMap {
-    pub fn get_def_map(&self) -> Result<HashMap<String, &Composite>, anyhow::Error> {
+    pub fn get_def_map(&self) -> Result<HashMap<String, &Composite>, ResolveError> {
         let mut def_map = HashMap::with_capacity(self.def.len());
         for def in &self.def {
-            if def_map.insert(def.name().to_string(), def).is_some() {
-                return Err(anyhow!("Definition \"{}\" already exists.", def.name()));
+            let def_string = def.name().to_string();
+            if let Some(residual) = def_map.insert(def_string, def) {
+                return Err(ResolveError::duplicate(def, residual));
             }
         }
         Ok(def_map)
@@ -73,5 +141,5 @@ pub fn get_memory_map_schema() -> String {
 
 pub trait Name {
     fn name(&self) -> &str;
-    fn type_name() -> &'static str;
+    fn type_name(&self) -> &'static str;
 }

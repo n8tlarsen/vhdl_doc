@@ -5,12 +5,14 @@ use serde::{Deserialize, Serialize};
 use serde_with::{formats::PreferOne, serde_as, DefaultOnNull, OneOrMany};
 use std::collections::HashMap;
 
+/// The resolver trait provides a common API for resolving optional fields of composite document
+/// elements
 pub trait Resolver {
     /// Resolve the composite type for tabular presentation
     fn resolve(
         &self,
         address: &mut u64,
-        table: &Vec<ResolvedEntry>,
+        table: &str,
         def_map: &HashMap<String, &Composite>,
         protocol: &Protocol,
     );
@@ -18,6 +20,7 @@ pub trait Resolver {
     fn size(&self, def_map: &HashMap<String, &Composite>) -> u64;
 }
 
+/// The Index describes a list or series expansion for use with the Array composite
 #[serde_as]
 #[derive(Deserialize, Serialize, JsonSchema, Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -28,6 +31,7 @@ pub enum Index {
     List(#[serde_as(as = "OneOrMany<Option<IntegerOrString>, PreferOne>")] Vec<Option<String>>),
 }
 
+/// Arrays allow for list or series expansions of other elements.
 #[serde_as]
 #[derive(Deserialize, Serialize, JsonSchema, Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -51,7 +55,7 @@ impl Resolver for Array {
     fn resolve(
         &self,
         address: &mut u64,
-        table: &Vec<ResolvedEntry>,
+        table: &str,
         def_map: &HashMap<String, &Composite>,
         protocol: &Protocol,
     ) {
@@ -94,11 +98,12 @@ impl Name for Array {
     fn name(&self) -> &str {
         &self.name
     }
-    fn type_name() -> &'static str {
+    fn type_name(&self) -> &'static str {
         "Array"
     }
 }
 
+/// Clusters represent groupings of elements and are akin to structs.
 #[serde_as]
 #[derive(Deserialize, Serialize, JsonSchema, Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -117,7 +122,7 @@ impl Resolver for Cluster {
     fn resolve(
         &self,
         address: &mut u64,
-        table: &Vec<ResolvedEntry>,
+        table: &str,
         def_map: &HashMap<String, &Composite>,
         protocol: &Protocol,
     ) {
@@ -140,7 +145,7 @@ impl Name for Cluster {
     fn name(&self) -> &str {
         &self.name
     }
-    fn type_name() -> &'static str {
+    fn type_name(&self) -> &'static str {
         "Cluster"
     }
 }
@@ -157,7 +162,7 @@ impl<'a> IntoIterator for &'a Cluster {
     type Item = &'a Composite;
     type IntoIter = std::slice::Iter<'a, Composite>;
     fn into_iter(self) -> Self::IntoIter {
-        (&self.elements).iter()
+        self.elements.iter()
     }
 }
 
@@ -165,10 +170,12 @@ impl<'a> IntoIterator for &'a mut Cluster {
     type Item = &'a mut Composite;
     type IntoIter = std::slice::IterMut<'a, Composite>;
     fn into_iter(self) -> Self::IntoIter {
-        (&mut self.elements).iter_mut()
+        self.elements.iter_mut()
     }
 }
 
+/// Entries are the fundamental unit of memory. They can be further described with field
+/// definitions.
 #[serde_as]
 #[derive(Deserialize, Serialize, JsonSchema, Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -190,7 +197,7 @@ impl Resolver for Entry {
     fn resolve(
         &self,
         address: &mut u64,
-        table: &Vec<ResolvedEntry>,
+        table: &str,
         def_map: &HashMap<String, &Composite>,
         protocol: &Protocol,
     ) {
@@ -204,11 +211,12 @@ impl Name for Entry {
     fn name(&self) -> &str {
         &self.name
     }
-    fn type_name() -> &'static str {
+    fn type_name(&self) -> &'static str {
         "Entry"
     }
 }
 
+/// The composite type collects the memory map types into an enum for serde processing
 #[derive(Deserialize, Serialize, JsonSchema, Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
 #[serde(untagged)]
@@ -232,7 +240,7 @@ impl Resolver for Composite {
     fn resolve(
         &self,
         address: &mut u64,
-        table: &Vec<ResolvedEntry>,
+        table: &str,
         def_map: &HashMap<String, &Composite>,
         protocol: &Protocol,
     ) {
@@ -259,7 +267,34 @@ impl Name for Composite {
             Composite::Map { map } => map,
         }
     }
-    fn type_name() -> &'static str {
-        "Composite"
+    fn type_name(&self) -> &'static str {
+        match self {
+            Composite::Array(array) => array.type_name(),
+            Composite::Cluster(cluster) => cluster.type_name(),
+            Composite::Entry(entry) => entry.type_name(),
+            Composite::Reference { .. } => "Reference",
+            Composite::Map { .. } => "Map",
+        }
+    }
+}
+
+impl Name for &Composite {
+    fn name(&self) -> &str {
+        match self {
+            Composite::Array(array) => array.name(),
+            Composite::Cluster(cluster) => cluster.name(),
+            Composite::Entry(entry) => entry.name(),
+            Composite::Reference { reference } => reference,
+            Composite::Map { map } => map,
+        }
+    }
+    fn type_name(&self) -> &'static str {
+        match self {
+            Composite::Array(array) => array.type_name(),
+            Composite::Cluster(cluster) => cluster.type_name(),
+            Composite::Entry(entry) => entry.type_name(),
+            Composite::Reference { .. } => "Reference",
+            Composite::Map { .. } => "Map",
+        }
     }
 }
